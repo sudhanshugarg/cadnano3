@@ -51,6 +51,7 @@ function Button(flag){
         'move': 8,
         'shift': 16 
     };
+    this.previousHelix_ = undefined;
 }
 
 Button.prototype.getCurrX = function(){
@@ -69,8 +70,41 @@ Button.prototype.setCurrY = function(posn){
     this.currY = posn;
 };
 
+Button.prototype.setPreviousHelix = function(id){
+    if(id){
+        this.previousHelix_ = id;
+    }
+};
+
+Button.prototype.previousHelix = function(){
+        return this.previousHelix_;
+};
+
+Button.prototype.mouseHover = function(e, view){
+    if(!e.target.id) return;
+    if ((this.flag & 4)){
+        var foo = $.proxy(view.dispatch, view);
+        keyOn = {
+            action: 'hover',
+            val: e.target.id
+        };
+        keyOff = {
+            action: 'nohover',
+            val: this.previousHelix()
+        };
+        foo(keyOn);
+        console.log(this.previousHelix());
+        foo(keyOff);
+        console.log(this.previousHelix() + '-to-' + e.target.id);
+        this.setPreviousHelix(e.target.id);
+        console.log(e);
+    }
+};
+
 Button.prototype.mouseAction = function(e, view){
     //Zoom in/out
+    if(!e.target.id) return;
+
     console.log('testing _b flag: ' + this.flag);
     var foo = $.proxy(view.dispatch, view);
     var key = {
@@ -86,13 +120,13 @@ Button.prototype.mouseAction = function(e, view){
         }
         foo(key);
     } else if (this.flag & 4){
+        //trying to read in the svg node.
         key = {
             action: 'edit',
-            row: 0,
-            col: 0
+            val: e.target.id
         };
-        console.log(e.id);
-        console.log(e);
+        console.log(e.target.id);
+        foo(key);
     }
 };
 
@@ -104,7 +138,6 @@ Button.prototype.ifKeyPressed = function(e){
     if(e.keyCode === 16){
         this.flag |= 16;
         console.log('in inKeyPressed: flag=' + this.flag);
-        //two.update();
     }
 };
 
@@ -113,7 +146,6 @@ Button.prototype.ifKeyUnpressed = function(e){
     if(e.keyCode === 16){
         this.flag -= 16;
         console.log('in inKeyUnpressed: flag=' + this.flag);
-        //two.update();
     }
 };
 
@@ -121,7 +153,6 @@ Button.prototype.ifMousePressed = function(id){
     console.log("in function ifMousePressed, id=" + id);
     this.flag = this.bVal[id];
     console.log("in function ifMousePressed, flag=" + this.flag);
-    //two.update();
 };
 
 Button.prototype.ifMouseKept = function(e){
@@ -136,6 +167,7 @@ Button.prototype.ifMouseKept = function(e){
 };
 
 Button.prototype.ifMouseMoved = function(e,view){
+    if(!e.target.id) return;
     if(this.mflag & 2){
         console.log(this);
         console.log('moving mouse' + e.clientX + ',' + e.clientY);
@@ -166,6 +198,7 @@ Button.prototype.ifMouseLeft = function(e){
 function VirtualHelixItem(r,c){
     this.row_ = r;
     this.col_ = c;
+    this.isSelected_ = false;
 }
 
 VirtualHelixItem.prototype.setRowCol = function(r, c){
@@ -175,17 +208,48 @@ VirtualHelixItem.prototype.setRowCol = function(r, c){
 
 VirtualHelixItem.prototype.getPolygon = function(){
     return this.polygon_;
-}
+};
 
 VirtualHelixItem.prototype.make = function(two,x,y,r){
     this.polygon_ = two.makeCircle(x,y,r);
 
     // The object returned has many stylable properties:
-    this.polygon_.fill = '#F2AA77';
+    this.polygon_.fill = '#C2BABD';
     this.polygon_.stroke = 'black'; // Accepts all valid css color
     this.polygon_.linewidth = 1;
     return this.polygon_;
-}
+};
+
+VirtualHelixItem.prototype.hover = function(){
+    console.log('eh there');
+    if(this.isSelected_ === false){
+        this.polygon_.linewidth = 3;
+        this.polygon_.fill = '#5F7DF5';
+        this.polygon_.stroke = '#1B39E0';
+    }
+};
+
+VirtualHelixItem.prototype.nohover = function(){
+    console.log('eh there bye');
+    if(this.isSelected_ === false){
+        this.polygon_.linewidth = 1;
+        this.polygon_.fill = '#C2BABD';
+        this.polygon_.stroke = 'black';
+    }
+};
+
+VirtualHelixItem.prototype.select = function(){
+    if(this.isSelected_ === false){
+        this.polygon_.linewidth = 1;
+        this.polygon_.fill = '#EB7A42';
+        this.polygon_.stroke = '#D64C06';
+        this.isSelected_ = true;
+    }
+};
+
+VirtualHelixItem.prototype.getSvgID = function(){
+    return this.polygon_.id;
+};
 
 /* CONTROLLERS HERE */
 
@@ -193,6 +257,7 @@ DocumentItem = function(){
     this.params_ = { width: 685, height: 400 };
     this.two_ = new Two(this.params_);
     this.started_ = new signals.Signal();
+    this.part_ = {};
 }
 
 DocumentItem.prototype.update = function(key){
@@ -205,6 +270,25 @@ DocumentItem.prototype.update = function(key){
     }
     else if (key.action === 'move'){
         this.group_.translation.set(key.x, key.y);
+    }
+    else if (key.action === 'edit'){
+        var helix = this.part_[key.val];
+        var foo = $.proxy(helix.select,helix);
+        foo();
+    }
+    else if (key.action === 'hover' && key.val){
+        var helix = this.part_[key.val];
+        if(helix){
+            var foo = $.proxy(helix.hover,helix);
+            foo();
+        }
+    }
+    else if (key.action === 'nohover' && key.val){
+        var helix = this.part_[key.val];
+        if(helix){
+            var foo = $.proxy(helix.nohover,helix);
+            foo();
+        }
     }
 
     // Don't forget to tell two to render everything
@@ -232,7 +316,7 @@ DocumentItem.prototype.init = function(){
     var y_even_init = 60;
     var y_odd_init = y_even_init + 4*radius;
     var Rows = 10;
-    var Cols = 12;
+    var Cols = 10;
     var circles = [];
     for(var row = 0; row<Rows; row++){
         x_curr = x_init;
@@ -256,6 +340,8 @@ DocumentItem.prototype.init = function(){
             var helix = new VirtualHelixItem(row,col);
             helix.make(this.two_,x_curr,y_curr,radius);
             this.two_.add(helix.getPolygon());
+            var k = 'two-' + helix.getSvgID();
+            this.part_[k] = helix;
 
             //var circle = this.two_.makeCircle(x_curr, y_curr, radius);
             x_curr += 1.732*radius;
@@ -290,6 +376,10 @@ function DocumentController(){
 
     document.getElementById("honey-comb").onmousemove=function(e){
         var foo = $.proxy(editMenu.ifMouseMoved,editMenu);
+        foo(e,sliceView);
+    };
+    document.getElementById("honey-comb").onmouseover=function(e){
+        var foo = $.proxy(editMenu.mouseHover,editMenu);
         foo(e,sliceView);
     };
     document.getElementById("honey-comb").onclick=function(e){
