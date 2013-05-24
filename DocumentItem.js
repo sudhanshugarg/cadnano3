@@ -6,12 +6,44 @@ function START(){
 
 /* MODELS HERE */
 
-function VirtualHelix(){
-    this.r_;
-    this.c_;
-    this.isSelected_ = false;
+function PartItem(){
+    this.LatticeType_ = 0; //HoneyComb
+    this.currEvenHelix_ = -2; //Helix Numbering
+    this.currOddHelix_ = -1; //Helix Numbering
+    this.part_ = {}; //Stores all the virtual helix items.
+    this.circles_ = []; //Stores the virtual helix polygons.
 }
 
+PartItem.prototype.getHelix = function(id){
+    return this.part_[id];
+};
+
+PartItem.prototype.setHelix = function(key, helix){
+    if(key){
+        this.part_[key] = helix;
+    }
+};
+
+PartItem.prototype.getHelices = function(){
+    return this.circles_;
+};
+
+PartItem.prototype.addHelix = function(polygon){
+    if(polygon){
+        this.circles_.push(polygon);
+    }
+};
+
+PartItem.prototype.getNextEvenHelixID = function(id){
+    this.currEvenHelix_+=2;
+    return this.currEvenHelix_;
+};
+
+PartItem.prototype.getNextOddHelixID = function(id){
+    this.currOddHelix_+=2;
+    return this.currOddHelix_;
+};
+//////////////////////////////////////////////////////////////////
 
 function Stack(){
     this.storage_ = new Array();
@@ -36,7 +68,7 @@ function Document(){
 
 function Button(flag){
     this.flag = flag;
-    this.mflag = flag;
+    this.mouseClickedFlag = flag;
     this.diffX = 0;
     this.diffY = 0;
     this.currX = 0;
@@ -160,15 +192,35 @@ Button.prototype.ifMouseKept = function(e){
         console.log(this);
         console.log('mouse down');
         console.log('curr:' + this.getCurrX()+','+this.getCurrY());
-        this.mflag = 2;
+        this.mouseClickedFlag = 2;
         this.diffX = this.getCurrX()-e.clientX;
         this.diffY = this.getCurrY()-e.clientY;
     }
 };
 
+Button.prototype.Zoom = function(e,view){
+    //Zoom in/out
+    if(!e.target.id) return;
+
+    if(this.flag & 2) {
+        console.log('testing _b flag: ' + this.flag);
+        var delta=e.detail? e.detail*(-120) : e.wheelDelta;
+        console.log('delta=' + delta + ',detail:' + e.detail + ',e.wheelDelta=' + e.wheelDelta);
+        var zoomval = delta/240;
+        console.log(zoomval);
+        var foo = $.proxy(view.dispatch, view);
+        var key = {
+            action: 'zoom',
+            val: zoomval
+        };
+        console.log('calling foo');
+        foo(key);
+    }
+};
+
 Button.prototype.ifMouseMoved = function(e,view){
     if(!e.target.id) return;
-    if(this.mflag & 2){
+    if(this.mouseClickedFlag & 2){
         console.log(this);
         console.log('moving mouse' + e.clientX + ',' + e.clientY);
         this.setCurrX(e.clientX + this.diffX);
@@ -185,9 +237,9 @@ Button.prototype.ifMouseMoved = function(e,view){
 };
 
 Button.prototype.ifMouseLeft = function(e){
-    if(this.mflag & 2){
+    if(this.mouseClickedFlag & 2){
         console.log('mouse up');
-        this.mflag -= 2;
+        this.mouseClickedFlag -= 2;
         this.diffX = 0;
         this.diffY = 0;
     }
@@ -199,6 +251,7 @@ function VirtualHelixItem(r,c){
     this.row_ = r;
     this.col_ = c;
     this.isSelected_ = false;
+    this.id_ = -1;
 }
 
 VirtualHelixItem.prototype.setRowCol = function(r, c){
@@ -214,8 +267,8 @@ VirtualHelixItem.prototype.make = function(two,x,y,r){
     this.polygon_ = two.makeCircle(x,y,r);
 
     // The object returned has many stylable properties:
-    this.polygon_.fill = '#C2BABD';
-    this.polygon_.stroke = 'black'; // Accepts all valid css color
+    this.polygon_.fill = '#D4D4D4';
+    this.polygon_.stroke = 'black';
     this.polygon_.linewidth = 1;
     return this.polygon_;
 };
@@ -233,17 +286,19 @@ VirtualHelixItem.prototype.nohover = function(){
     console.log('eh there bye');
     if(this.isSelected_ === false){
         this.polygon_.linewidth = 1;
-        this.polygon_.fill = '#C2BABD';
+        this.polygon_.fill = '#D4D4D4';
         this.polygon_.stroke = 'black';
     }
 };
 
-VirtualHelixItem.prototype.select = function(){
+VirtualHelixItem.prototype.select = function(id){
     if(this.isSelected_ === false){
         this.polygon_.linewidth = 1;
         this.polygon_.fill = '#EB7A42';
         this.polygon_.stroke = '#D64C06';
         this.isSelected_ = true;
+        this.id_ = id;
+        console.log('new helix id = '+id);
     }
 };
 
@@ -251,40 +306,62 @@ VirtualHelixItem.prototype.getSvgID = function(){
     return this.polygon_.id;
 };
 
+VirtualHelixItem.prototype.isEvenParity = function(){
+    return ((this.row_ % 2) === (this.col_ % 2));
+}
+
+VirtualHelixItem.prototype.isOddParity = function(){
+    return ((this.row_ % 2) ^ (this.col_ % 2));
+}
+
 /* CONTROLLERS HERE */
 
 DocumentItem = function(){
-    this.params_ = { width: 685, height: 400 };
+    var w = $('#slice-view').css('width');
+    var h = $('#slice-view').css('height');
+    this.params_ = { type: Two.Types.svg, width: w, height: h };
     this.two_ = new Two(this.params_);
     this.started_ = new signals.Signal();
-    this.part_ = {};
+    this.part_ = new PartItem();
 }
 
 DocumentItem.prototype.update = function(key){
     if(key.action === 'zoom'){
-        if(key.val < 0 && this.group_.scale < 0.3){
+        var newScale = this.group_.scale + key.val;
+        if(newScale < 0.3){
+            this.group_.scale = 0.3;
         }
-        else{
-            this.group_.scale += key.val;
+        else if (newScale > 3){
+            this.group_.scale = 3;
+        }
+        else {
+            this.group_.scale = newScale;
         }
     }
     else if (key.action === 'move'){
         this.group_.translation.set(key.x, key.y);
     }
     else if (key.action === 'edit'){
-        var helix = this.part_[key.val];
+        var helix = this.part_.getHelix(key.val);
+        var id;
+        if(helix.isEvenParity()){
+            id = this.part_.getNextEvenHelixID();
+        }
+        else {
+            id = this.part_.getNextOddHelixID();
+        }
         var foo = $.proxy(helix.select,helix);
-        foo();
+        foo(id);
     }
     else if (key.action === 'hover' && key.val){
-        var helix = this.part_[key.val];
+        var helix = this.part_.getHelix(key.val);
         if(helix){
             var foo = $.proxy(helix.hover,helix);
             foo();
         }
     }
     else if (key.action === 'nohover' && key.val){
-        var helix = this.part_[key.val];
+        var helix = this.part_.getHelix(key.val);
         if(helix){
             var foo = $.proxy(helix.nohover,helix);
             foo();
@@ -305,19 +382,24 @@ DocumentItem.prototype.init = function(){
 
     // Link signal handlers
     this.started_.add($.proxy(this.update,this));
-
     // Make an instance of two and place it on the page.
-    var elem = document.getElementById('honey-comb').children[0];
+    var elem = document.getElementById('slice-view').children[0];
     this.two_.appendTo(elem);
+    this.part_.createHoneyComb(this.two_);
+
+    this.group_ = this.two_.makeGroup(this.part_.getHelices());
+    this.two_.update();
+};
+
+PartItem.prototype.createHoneyComb = function(twoHandler){
 
     // two has convenience methods to create shapes.
     var radius = 20;
     var x_init = 60;
     var y_even_init = 60;
     var y_odd_init = y_even_init + 4*radius;
-    var Rows = 10;
-    var Cols = 10;
-    var circles = [];
+    var Rows = 50;
+    var Cols = 50;
     for(var row = 0; row<Rows; row++){
         x_curr = x_init;
         if(row % 2 === 0){
@@ -338,18 +420,15 @@ DocumentItem.prototype.init = function(){
             }
 
             var helix = new VirtualHelixItem(row,col);
-            helix.make(this.two_,x_curr,y_curr,radius);
-            this.two_.add(helix.getPolygon());
+            helix.make(twoHandler,x_curr,y_curr,radius);
+            twoHandler.add(helix.getPolygon());
             var k = 'two-' + helix.getSvgID();
-            this.part_[k] = helix;
+            this.setHelix(k, helix);
 
-            //var circle = this.two_.makeCircle(x_curr, y_curr, radius);
             x_curr += 1.732*radius;
-            circles.push(helix.getPolygon());
+            this.addHelix(helix.getPolygon());
         }
     }
-    this.group_ = this.two_.makeGroup(circles);
-    this.two_.update();
 };
 
     /* Controllers */
@@ -364,25 +443,28 @@ function DocumentController(){
     sliceView.init();
 
     editMenu = new Button(0);
-    editMenu.setCurrX(document.getElementById("para").offsetLeft);
-    editMenu.setCurrY(document.getElementById("para").offsetTop);
+    editMenu.setCurrX(document.getElementById("lattice").offsetLeft);
+    editMenu.setCurrY(document.getElementById("lattice").offsetTop);
     console.log(editMenu.getCurrX()+','+editMenu.getCurrY());
 
     document.onkeydown=$.proxy(editMenu.ifKeyPressed, editMenu);
     document.onkeyup=$.proxy(editMenu.ifKeyUnpressed, editMenu);
-    document.getElementById("honey-comb").onmousedown=$.proxy(editMenu.ifMouseKept, editMenu);
-    document.getElementById("honey-comb").onmouseup=$.proxy(editMenu.ifMouseLeft, editMenu);
-    document.getElementById("para").onmousewheel=$.proxy(editMenu.hoveringDude,editMenu);
+    document.getElementById("slice-view").onmousedown=$.proxy(editMenu.ifMouseKept, editMenu);
+    document.getElementById("slice-view").onmouseup=$.proxy(editMenu.ifMouseLeft, editMenu);
 
-    document.getElementById("honey-comb").onmousemove=function(e){
+    document.getElementById("complete-doc").onmousewheel=function(e){
+        var foo = $.proxy(editMenu.Zoom,editMenu);
+        foo(e,sliceView);
+    };
+    document.getElementById("slice-view").onmousemove=function(e){
         var foo = $.proxy(editMenu.ifMouseMoved,editMenu);
         foo(e,sliceView);
     };
-    document.getElementById("honey-comb").onmouseover=function(e){
+    document.getElementById("slice-view").onmouseover=function(e){
         var foo = $.proxy(editMenu.mouseHover,editMenu);
         foo(e,sliceView);
     };
-    document.getElementById("honey-comb").onclick=function(e){
+    document.getElementById("slice-view").onclick=function(e){
         var foo = $.proxy(editMenu.mouseAction,editMenu);
         foo(e,sliceView);
     };
